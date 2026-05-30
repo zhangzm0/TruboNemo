@@ -1,6 +1,7 @@
-# Nemo Player
+# TurboNemo
 
-轻量级 Nemo/Scratch 编程作品运行时，基于 PixiJS v5 的协程调度引擎。
+轻量级 Nemo 编程作品Player。
+基于 PixiJS v5 协程调度，目前支持克隆、变量、广播、画笔等部分积木。
 
 ## 快速开始
 
