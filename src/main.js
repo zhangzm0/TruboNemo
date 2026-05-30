@@ -1,13 +1,17 @@
 // src/main.js
 import { NemoPlayer } from './core/nemo-player.js';
 
+// 从 URL 参数获取作品 ID
+const params = new URLSearchParams(window.location.search);
+const workId = params.get('id') || '272459552'; // 默认作品
+
 const core = new NemoPlayer({ container: 'body', width: 562, height: 900 });
 
-// 内置扩展（默认加载）
+// 内置扩展
 core.use((await import('./extensions/screen/index.js')).default);
 core.use((await import('./extensions/actor/index.js')).default);
 
-// 动态加载扩展列表
+// 动态加载扩展
 const extList = [
     'motion',
     'looks',
@@ -16,7 +20,7 @@ const extList = [
     'sensing',
     'clone',
     'sound',
-    // 'pen',
+    'pen',
     'procedures',
     'broadcast',
 ];
@@ -42,6 +46,6 @@ core.app.ticker.add(() => {
     timerEl.textContent = elapsed.toFixed(2) + 's';
 });
 
-core.loadFromWorkId(272203880).then(() => console.log('✅ 就绪'));
+core.loadFromWorkId(parseInt(workId)).then(() => console.log('✅ 就绪'));
 
 window.core = core;
