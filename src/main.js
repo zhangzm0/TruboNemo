@@ -12,19 +12,30 @@ function setLoading(title, detail) {
     if (detail) loadingDetail.textContent = detail;
 }
 
+function fetchWithTimeout(url, timeout = 5000) {
+    return Promise.race([
+        fetch(url),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeout))
+    ]);
+}
+
 setLoading('TurboNemo', '正在获取作品信息...');
 
-// 获取作品信息
-const infoPromise = fetch(`https://api.codemao.cn/creation-tools/v1/works/${workId}`)
+// 获取作品信息（带超时）
+const infoPromise = fetchWithTimeout(
+    `https://api.codemao.cn/creation-tools/v1/works/${workId}`, 5000
+)
     .then(r => r.json())
     .then(data => {
         document.title = `${data.work_name} - TurboNemo`;
-        infoEl.textContent = `By ${data.user_info.nickname}`;
+        infoEl.textContent = `${data.work_name} — by ${data.user_info.nickname}`;
         setLoading(data.work_name, `by ${data.user_info.nickname}`);
         return data;
     })
     .catch(() => {
-        setLoading('TurboNemo', '无法获取作品信息');
+        document.title = 'TurboNemo';
+        infoEl.textContent = '';
+        setLoading('TurboNemo', '');
         return null;
     });
 
@@ -90,6 +101,12 @@ core.eventBus.on('loader:asset', ({ loaded, total }) => {
 // 加载作品
 setLoading('TurboNemo', '正在编译脚本...');
 await core.loadFromWorkId(parseInt(workId));
+
+// 等待作品信息（最多再等 2 秒）
+await Promise.race([
+    infoPromise,
+    new Promise(r => setTimeout(r, 2000))
+]);
 
 // 隐藏加载页
 loadingEl.style.opacity = '0';
