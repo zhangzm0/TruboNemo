@@ -40,30 +40,138 @@ function hsl_to_hex(h, s, l) {
     return ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
 }
 
-const penStyle = {
-    size: 1,
-    color: '000000',
-    alpha: 1,
-    hue: 0,
-    saturation: 0,
-    brightness: 0,
-    fillColor: '000000',
-    _r: 0, _g: 0, _b: 0,
-    _fillR: 0, _fillG: 0, _fillB: 0,
-};
+// ---------- Brush 类 ----------
+class Brush {
+    constructor(canvas, ctx, actor, eventBus, onDirty) {
+        this.canvas = canvas;
+        this.ctx = ctx;
+        this.actor = actor;
+        this.eventBus = eventBus;
+        this.onDirty = onDirty;
+        this.size = 5;
+        this.color = '000000';
+        this.alpha = 1;
+        this.hsl = [0, 0, 0];
+        this.fillColor = '000000';
+        this._r = 0; this._g = 0; this._b = 0;
+        this._fillR = 0; this._fillG = 0; this._fillB = 0;
+        this.updateColorCache();
+        this.updateFillColorCache();
+        this.down = false;
+        this.lastX = null;
+        this.lastY = null;
+        this.filling = false;
 
-function updateColorCache() {
-    const hex = penStyle.color;
-    penStyle._r = parseInt(hex.slice(0, 2), 16);
-    penStyle._g = parseInt(hex.slice(2, 4), 16);
-    penStyle._b = parseInt(hex.slice(4, 6), 16);
-}
+        this._onMove = () => {
+            if (this.down && this.actor.sprite) {
+                this.drawLine(this.actor.sprite.x, this.actor.sprite.y);
+            }
+        };
+    }
 
-function updateFillColorCache() {
-    const hex = penStyle.fillColor;
-    penStyle._fillR = parseInt(hex.slice(0, 2), 16);
-    penStyle._fillG = parseInt(hex.slice(2, 4), 16);
-    penStyle._fillB = parseInt(hex.slice(4, 6), 16);
+    updateColorCache() {
+        const hex = this.color;
+        this._r = parseInt(hex.slice(0, 2), 16);
+        this._g = parseInt(hex.slice(2, 4), 16);
+        this._b = parseInt(hex.slice(4, 6), 16);
+    }
+    updateFillColorCache() {
+        const hex = this.fillColor;
+        this._fillR = parseInt(hex.slice(0, 2), 16);
+        this._fillG = parseInt(hex.slice(2, 4), 16);
+        this._fillB = parseInt(hex.slice(4, 6), 16);
+    }
+
+    setColor(hex) { this.color = hex; this.hsl = hex_to_hsl(hex); this.updateColorCache(); }
+    setSize(v) { this.size = clamp(v, 1, 10000); }
+    changeSize(d) { this.size = clamp(this.size + d, 1, 10000); }
+    setHue(h) { h = h % 360; if (h < 0) h += 360; this.hsl[0] = h; this.color = hsl_to_hex(this.hsl[0], this.hsl[1], this.hsl[2]); this.updateColorCache(); }
+    changeHue(d) { this.setHue(this.hsl[0] + d); }
+    setSaturation(s) { this.hsl[1] = clamp(s, 0, 1); this.color = hsl_to_hex(this.hsl[0], this.hsl[1], this.hsl[2]); this.updateColorCache(); }
+    changeSaturation(d) { this.setSaturation(this.hsl[1] + d); }
+    setBrightness(b) { this.hsl[2] = clamp(b, 0, 1); this.color = hsl_to_hex(this.hsl[0], this.hsl[1], this.hsl[2]); this.updateColorCache(); }
+    changeBrightness(d) { this.setBrightness(this.hsl[2] + d); }
+    setAlpha(a) { this.alpha = clamp(a, 0, 1); }
+    changeAlpha(d) { this.alpha = clamp(this.alpha + d, 0, 1); }
+    setFillColor(hex) { this.fillColor = hex; this.updateFillColorCache(); }
+
+    penDown() {
+        this.down = true;
+        this.lastX = this.actor.sprite.x;
+        this.lastY = this.actor.sprite.y;
+        this.eventBus.on(`actor:moved:${this.actor.name}`, this._onMove);
+    }
+    penUp() {
+        this.down = false;
+        this.eventBus.off(`actor:moved:${this.actor.name}`, this._onMove);
+        this.lastX = null;
+        this.lastY = null;
+    }
+    clear() {
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.onDirty();
+    }
+    drawLine(x, y) {
+        if (this.lastX === null) { this.lastX = x; this.lastY = y; return; }
+        //if (x === this.lastX && y === this.lastY) return;
+        const ctx = this.ctx;
+        ctx.save();
+        ctx.lineWidth = this.size;
+        ctx.strokeStyle = `rgb(${this._r},${this._g},${this._b})`;
+        ctx.globalAlpha = this.alpha;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        if (this.filling) {
+            ctx.lineTo(this.toCanvasX(x), this.toCanvasY(y));
+            ctx.stroke();
+        } else {
+            ctx.beginPath();
+            ctx.moveTo(this.toCanvasX(this.lastX), this.toCanvasY(this.lastY));
+            ctx.lineTo(this.toCanvasX(x), this.toCanvasY(y));
+            // ctx.strokeRect(this.toCanvasX(x), this.toCanvasY(y), 40, 40);
+            // ctx.fillRect(this.toCanvasX(x), this.toCanvasY(y), 20, 20)
+            ctx.stroke();
+        }
+        ctx.restore();
+        this.lastX = x;
+        this.lastY = y;
+        this.onDirty();
+    }
+    fillStart(x, y) {
+        this.filling = true;
+        const ctx = this.ctx;
+        ctx.save();
+        ctx.fillStyle = `rgb(${this._fillR},${this._fillG},${this._fillB})`;
+        ctx.lineWidth = this.size;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(this.toCanvasX(x), this.toCanvasY(y));
+    }
+    fillEnd(x, y) {
+        if (!this.filling) return;
+        const ctx = this.ctx;
+        ctx.lineTo(this.toCanvasX(x), this.toCanvasY(y));
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+        this.filling = false;
+        this.onDirty();
+    }
+    stamp(text, size, x, y) {
+        const ctx = this.ctx;
+        ctx.save();
+        ctx.font = `bold ${clamp(size || 24, 1, 10000)}px Arial, Microsoft YaHei`;
+        ctx.fillStyle = `rgb(${this._r},${this._g},${this._b})`;
+        ctx.globalAlpha = this.alpha;
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'center';
+        ctx.fillText(String(text), this.toCanvasX(x), this.toCanvasY(y));
+        ctx.restore();
+        this.onDirty();
+    }
+    toCanvasX(sx) { return this.canvas.width / 2 + sx; }
+    toCanvasY(sy) { return this.canvas.height / 2 + sy; }
 }
 
 function isScreen(c) { return c.target === 'screen'; }
@@ -75,40 +183,40 @@ export default {
         'self_pen_down': {
             generator(c, b) {
                 if (isScreen(c)) return c.compileNext(b) || '';
-                return `    __global__.__pen__.down(self);\n` + c.compileNext(b);
+                return `    self._brush.penDown();\n` + c.compileNext(b);
             },
         },
         'self_pen_up': {
             generator(c, b) {
                 if (isScreen(c)) return c.compileNext(b) || '';
-                return `    __global__.__pen__.up(self);\n` + c.compileNext(b);
+                return `    self._brush.penUp();\n` + c.compileNext(b);
             },
         },
         'clear_drawing': {
             generator(c, b) {
                 if (isScreen(c)) return c.compileNext(b) || '';
-                return `    __global__.__pen__.clear();\n` + c.compileNext(b);
+                return `    self._brush.clear();\n` + c.compileNext(b);
             },
         },
         'self_set_pen_size': {
             generator(c, b) {
                 if (isScreen(c)) return c.compileNext(b) || '';
                 const size = c.compileValue(b, 'size');
-                return `    __global__.__pen__.setSize(${size});\n` + c.compileNext(b);
+                return `    self._brush.setSize(${size});\n` + c.compileNext(b);
             },
         },
         'self_change_pen_size': {
             generator(c, b) {
                 if (isScreen(c)) return c.compileNext(b) || '';
                 const steps = c.compileValue(b, 'steps');
-                return `    __global__.__pen__.changeSize(${steps});\n` + c.compileNext(b);
+                return `    self._brush.changeSize(${steps});\n` + c.compileNext(b);
             },
         },
         'self_set_pen_color': {
             generator(c, b) {
                 if (isScreen(c)) return c.compileNext(b) || '';
                 const color = (b.querySelector(':scope > field[name="color"]')?.textContent.trim() || '#cc66cc').slice(1);
-                return `    __global__.__pen__.setColor('${color}');\n` + c.compileNext(b);
+                return `    self._brush.setColor('${color}');\n` + c.compileNext(b);
             },
         },
         'self_set_pen_color_property': {
@@ -116,10 +224,10 @@ export default {
                 if (isScreen(c)) return c.compileNext(b) || '';
                 const type = c.extractParams(b).scope;
                 const val = c.compileValue(b, 'val');
-                if (type === 'hue') return `    __global__.__pen__.setHue(${val});\n` + c.compileNext(b);
-                if (type === 'saturation') return `    __global__.__pen__.setSaturation((${val}) / 100);\n` + c.compileNext(b);
-                if (type === 'brightness') return `    __global__.__pen__.setBrightness((${val}) / 100);\n` + c.compileNext(b);
-                if (type === 'alpha') return `    __global__.__pen__.setAlpha((100 - (${val})) / 100);\n` + c.compileNext(b);
+                if (type === 'hue') return `    self._brush.setHue(${val});\n` + c.compileNext(b);
+                if (type === 'saturation') return `    self._brush.setSaturation((${val}) / 100);\n` + c.compileNext(b);
+                if (type === 'brightness') return `    self._brush.setBrightness((${val}) / 100);\n` + c.compileNext(b);
+                if (type === 'alpha') return `    self._brush.setAlpha((100 - (${val})) / 100);\n` + c.compileNext(b);
                 return c.compileNext(b) || '';
             },
         },
@@ -128,10 +236,10 @@ export default {
                 if (isScreen(c)) return c.compileNext(b) || '';
                 const type = c.extractParams(b).scope;
                 const steps = c.compileValue(b, 'steps');
-                if (type === 'hue') return `    __global__.__pen__.changeHue(${steps});\n` + c.compileNext(b);
-                if (type === 'saturation') return `    __global__.__pen__.changeSaturation((${steps}) / 100);\n` + c.compileNext(b);
-                if (type === 'brightness') return `    __global__.__pen__.changeBrightness((${steps}) / 100);\n` + c.compileNext(b);
-                if (type === 'alpha') return `    __global__.__pen__.changeAlpha(-(${steps}) / 100);\n` + c.compileNext(b);
+                if (type === 'hue') return `    self._brush.changeHue(${steps});\n` + c.compileNext(b);
+                if (type === 'saturation') return `    self._brush.changeSaturation((${steps}) / 100);\n` + c.compileNext(b);
+                if (type === 'brightness') return `    self._brush.changeBrightness((${steps}) / 100);\n` + c.compileNext(b);
+                if (type === 'alpha') return `    self._brush.changeAlpha(-(${steps}) / 100);\n` + c.compileNext(b);
                 return c.compileNext(b) || '';
             },
         },
@@ -140,16 +248,16 @@ export default {
                 if (isScreen(c)) return c.compileNext(b) || '';
                 const point = c.extractParams(b).point;
                 if (point === 'start') {
-                    return `    __global__.__pen__.fillStart(self);\n` + c.compileNext(b);
+                    return `    self._brush.fillStart(self.sprite.x, self.sprite.y);\n` + c.compileNext(b);
                 }
-                return `    __global__.__pen__.fillEnd(self);\n` + c.compileNext(b);
+                return `    self._brush.fillEnd(self.sprite.x, self.sprite.y);\n` + c.compileNext(b);
             },
         },
         'set_fill_style': {
             generator(c, b) {
                 if (isScreen(c)) return c.compileNext(b) || '';
                 const color = (b.querySelector(':scope > field[name="style"]')?.textContent.trim() || '#cc66cc').slice(1);
-                return `    __global__.__pen__.setFillColor('${color}');\n` + c.compileNext(b);
+                return `    self._brush.setFillColor('${color}');\n` + c.compileNext(b);
             },
         },
         'stamp': {
@@ -157,175 +265,14 @@ export default {
                 if (isScreen(c)) return c.compileNext(b) || '';
                 const text = c.compileValue(b, 'TEXT') || "''";
                 const size = c.compileValue(b, 'SIZE') || '24';
-                return `    __global__.__pen__.stamp(${text}, ${size}, self);\n` + c.compileNext(b);
+                return `    self._brush.stamp(${text}, ${size}, self.sprite.x, self.sprite.y);\n` + c.compileNext(b);
             },
         },
     },
+
     install(core) {
-        updateColorCache();
-        updateFillColorCache();
-
-        const states = new Map();
         let dirty = false;
-
-        function getState(actor) {
-            let st = states.get(actor.name);
-            if (!st) {
-                st = { down: false, lastX: null, lastY: null, filling: false, fillPath: null };
-                states.set(actor.name, st);
-            }
-            return st;
-        }
-
-        function getPen() {
-            return core.screenManager.getCurrent()?.penCanvas;
-        }
-
-        function toCanvasX(sx) { return core.width / 2 + sx; }
-        function toCanvasY(sy) { return core.height / 2 + sy; }
-
-        function flush() {
-            if (!dirty) return;
-            const pen = getPen();
-            if (pen) pen.texture.update();
-            dirty = false;
-        }
-
-        function onActorMove(actor) {
-            const st = getState(actor);
-            if (!st.down) return;
-            const x = actor.sprite.x;
-            const y = actor.sprite.y;
-            if (st.lastX === null) { st.lastX = x; st.lastY = y; return; }
-            // if (x === st.lastX && y === st.lastY) return;
-            const pen = getPen();
-            if (!pen) return;
-            const ctx = pen.ctx;
-            ctx.save();
-            ctx.lineWidth = penStyle.size;
-            ctx.strokeStyle = `rgb(${penStyle._r},${penStyle._g},${penStyle._b})`;
-            ctx.globalAlpha = penStyle.alpha;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            if (st.filling) {
-                ctx.lineTo(toCanvasX(x), toCanvasY(y));
-                ctx.stroke();
-            } else {
-                ctx.beginPath();
-                ctx.moveTo(toCanvasX(st.lastX), toCanvasY(st.lastY));
-                ctx.lineTo(toCanvasX(x), toCanvasY(y));
-                ctx.stroke();
-            }
-            ctx.restore();
-            st.lastX = x;
-            st.lastY = y;
-            dirty = true;
-        }
-
-        const penApi = {
-            down(actor) {
-                const st = getState(actor);
-                if (st.down) return;
-                st.down = true;
-                st.lastX = actor.sprite.x;
-                st.lastY = actor.sprite.y;
-                core.eventBus.on(`actor:moved:${actor.name}`, onActorMove);
-            },
-            up(actor) {
-                const st = getState(actor);
-                if (!st.down) return;
-                st.down = false;
-                st.lastX = null;
-                st.lastY = null;
-                core.eventBus.off(`actor:moved:${actor.name}`, onActorMove);
-            },
-            clear() {
-                const pen = getPen();
-                if (!pen) return;
-                pen.ctx.clearRect(0, 0, core.width, core.height);
-                dirty = true;
-            },
-            setSize(v) { penStyle.size = clamp(v, 1, 10000); },
-            changeSize(d) { penStyle.size = clamp(penStyle.size + d, 1, 10000); },
-            setColor(hex) {
-                penStyle.color = hex;
-                updateColorCache();
-                const hsl = hex_to_hsl(hex);
-                penStyle.hue = hsl[0];
-                penStyle.saturation = hsl[1];
-                penStyle.brightness = hsl[2];
-            },
-            setHue(h) {
-                h = h % 360; if (h < 0) h += 360;
-                penStyle.hue = h;
-                penStyle.color = hsl_to_hex(penStyle.hue, penStyle.saturation, penStyle.brightness);
-                updateColorCache();
-            },
-            changeHue(d) { this.setHue(penStyle.hue + d); },
-            setSaturation(s) {
-                penStyle.saturation = clamp(s, 0, 1);
-                penStyle.color = hsl_to_hex(penStyle.hue, penStyle.saturation, penStyle.brightness);
-                updateColorCache();
-            },
-            changeSaturation(d) { this.setSaturation(penStyle.saturation + d); },
-            setBrightness(b) {
-                penStyle.brightness = clamp(b, 0, 1);
-                penStyle.color = hsl_to_hex(penStyle.hue, penStyle.saturation, penStyle.brightness);
-                updateColorCache();
-            },
-            changeBrightness(d) { this.setBrightness(penStyle.brightness + d); },
-            setAlpha(a) { penStyle.alpha = clamp(a, 0, 1); },
-            changeAlpha(d) { penStyle.alpha = clamp(penStyle.alpha + d, 0, 1); },
-            setFillColor(hex) {
-                penStyle.fillColor = hex;
-                updateFillColorCache();
-            },
-            fillStart(actor) {
-                const st = getState(actor);
-                st.filling = true;
-                st.fillPath = [];
-                const pen = getPen();
-                if (!pen) return;
-                const ctx = pen.ctx;
-                ctx.save();
-                ctx.fillStyle = `rgb(${penStyle._fillR},${penStyle._fillG},${penStyle._fillB})`;
-                ctx.lineWidth = penStyle.size;
-                ctx.lineCap = 'round';
-                ctx.lineJoin = 'round';
-                ctx.beginPath();
-                ctx.moveTo(toCanvasX(actor.sprite.x), toCanvasY(actor.sprite.y));
-            },
-            fillEnd(actor) {
-                const st = getState(actor);
-                const pen = getPen();
-                if (pen && st.filling) {
-                    const ctx = pen.ctx;
-                    ctx.lineTo(toCanvasX(actor.sprite.x), toCanvasY(actor.sprite.y));
-                    ctx.closePath();
-                    ctx.fill();
-                    ctx.restore();
-                    dirty = true;
-                }
-                st.filling = false;
-                st.fillPath = null;
-            },
-            stamp(text, size, actor) {
-                const pen = getPen();
-                if (!pen) return;
-                const ctx = pen.ctx;
-                ctx.save();
-                ctx.font = `bold ${clamp(size || 24, 1, 10000)}px Arial, Microsoft YaHei`;
-                ctx.fillStyle = `rgb(${penStyle._r},${penStyle._g},${penStyle._b})`;
-                ctx.globalAlpha = penStyle.alpha;
-                ctx.textBaseline = 'middle';
-                ctx.textAlign = 'center';
-                ctx.fillText(String(text), toCanvasX(actor.sprite.x), toCanvasY(actor.sprite.y));
-                ctx.restore();
-                dirty = true;
-            },
-        };
-
-        core.globalHook('__pen__', () => penApi);
+        function markDirty() { dirty = true; }
 
         function createPenLayer(screen) {
             const canvas = document.createElement('canvas');
@@ -341,13 +288,27 @@ export default {
         }
 
         core.screenHook('penCanvas', (screen) => createPenLayer(screen));
-
         for (const screen of core.screenManager.list) {
-            if (!screen.penCanvas) {
-                screen.penCanvas = createPenLayer(screen);
+            if (!screen.penCanvas) screen.penCanvas = createPenLayer(screen);
+        }
+
+        core.actorHook('_brush', (actor) => {
+            const penCanvas = core.screenManager.getCurrent()?.penCanvas;
+            if (!penCanvas) return null;
+            return new Brush(penCanvas.canvas, penCanvas.ctx, actor, core.eventBus, markDirty);
+        });
+
+        for (const actor of core.actorManager.list) {
+            if (!actor._brush) {
+                const penCanvas = core.screenManager.getCurrent()?.penCanvas;
+                if (penCanvas) actor._brush = new Brush(penCanvas.canvas, penCanvas.ctx, actor, core.eventBus, markDirty);
             }
         }
 
-        core.app.ticker.add(() => flush());
+        core.app.ticker.add(() => {
+            if (!dirty) return;
+            core.screenManager.getCurrent()?.penCanvas?.texture.update();
+            dirty = false;
+        });
     },
 };

@@ -64,7 +64,16 @@ export const sensingBlocks = {
             if (bName === '__edge')
                 return `(function(){ var __a = __actors__.getByName(${lookupA}); if(!__a?.sprite) return false; var __hw = __screens__.width/2, __hh = __screens__.height/2; return Math.abs(__a.sprite.x) > __hw || Math.abs(__a.sprite.y) > __hh; })()`;
             if (bName === '__mouse')
-                return `(function(){ var __a = __actors__.getByName(${lookupA}); if(!__a?.sprite) return false; var __m = __global__.__mouse__; var __b = __a.sprite.getBounds(); return __m.x >= __b.x && __m.x <= __b.x+__b.width && __m.y >= __b.y && __m.y <= __b.y+__b.height; })()`;
+                return `(function(){
+    var __a = __actors__.getByName(${lookupA});
+    if(!__a?.sprite) return false;
+    var __m = __global__.__mouse__;
+    var __b = __a.sprite.getBounds();
+    // __mouse__ 是舞台坐标(中心原点)，转成屏幕坐标
+    var __mx = __screens__.width/2 + __m.x;
+    var __my = __screens__.height/2 - __m.y;
+    return __mx >= __b.x && __mx <= __b.x+__b.width && __my >= __b.y && __my <= __b.y+__b.height;
+})()`;
             return `__actors__.checkBump(${lookupA}, ${lookupB})`;
         },
     },

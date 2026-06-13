@@ -65,6 +65,10 @@ export const listBlocks = {
             if (type === 'all') {
                 return `    { const __arr = ${expr}; if (Array.isArray(__arr)) { __arr.length = 0; ${emitUpdateCode(id)} } }\n` + c.compileNext(b);
             }
+            if (type === 'last') {
+                return `    { const __arr = ${expr}; if (Array.isArray(__arr)) { __arr.pop(); ${emitUpdateCode(id)} } }\n` + c.compileNext(b);
+            }
+            // 默认：按索引删除
             const idx = c.compileValue(b, 'INDEX');
             return `    { const __arr = ${expr}; if (Array.isArray(__arr)) { __arr.splice((${idx}) - 1, 1); ${emitUpdateCode(id)} } }\n` + c.compileNext(b);
         },
@@ -79,19 +83,41 @@ export const listBlocks = {
     },
     'lists_copy': {
         generator(c, b) {
-            const target = compileListTarget(c, b);
-            // VALUE 也可能是表达式
-            const valEl = b.querySelector(':scope > value[name="VALUE"]');
-            const valBlock = valEl?.querySelector(':scope > block');
-            let srcExpr;
-            if (valBlock) {
-                srcExpr = c.compileValue(b, 'VALUE');
-            } else {
-                const srcField = valEl?.querySelector(':scope > shadow > field[name="VAR"]');
-                const srcId = srcField ? srcField.textContent.trim() : '';
-                srcExpr = srcId ? `self._vars['${srcId}']?.value` : '[]';
+            // TARGET 参数名是 "TARGET"，不是 "VAR"
+            const targetVarEl = b.querySelector(':scope > value[name="TARGET"]');
+            let targetId = '';
+            let targetExpr = '[]';
+            if (targetVarEl) {
+                const targetField = targetVarEl.querySelector(':scope > shadow > field[name="VAR"]');
+                if (targetField) {
+                    targetId = targetField.textContent.trim();
+                    targetExpr = `self._vars['${targetId}']?.value`;
+                } else {
+                    const targetBlock = targetVarEl.querySelector(':scope > block');
+                    if (targetBlock) {
+                        targetExpr = c.compileValue(b, 'TARGET');
+                    }
+                }
             }
-            return `    { const __src = ${srcExpr}; const __tgt = ${target.expr}; if (Array.isArray(__src) && Array.isArray(__tgt)) { __tgt.length = 0; __tgt.push(...__src); ${emitUpdateCode(target.id)} } }\n` + c.compileNext(b);
+
+            // VALUE 参数
+            const valEl = b.querySelector(':scope > value[name="VALUE"]');
+            let srcId = '';
+            let srcExpr = '[]';
+            if (valEl) {
+                const srcField = valEl.querySelector(':scope > shadow > field[name="VAR"]');
+                if (srcField) {
+                    srcId = srcField.textContent.trim();
+                    srcExpr = `self._vars['${srcId}']?.value`;
+                } else {
+                    const srcBlock = valEl.querySelector(':scope > block');
+                    if (srcBlock) {
+                        srcExpr = c.compileValue(b, 'VALUE');
+                    }
+                }
+            }
+
+            return `    { const __src = ${srcExpr}; const __tgt = ${targetExpr}; if (Array.isArray(__src) && Array.isArray(__tgt)) { __tgt.length = 0; __tgt.push(...__src); ${emitUpdateCode(targetId)} } }\n` + c.compileNext(b);
         },
     },
     'lists_get_value': {
